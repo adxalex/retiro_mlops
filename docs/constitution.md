@@ -15,4 +15,4 @@ Principios innegociables para toda spec, plan, tarea y línea de código. Si una
 11. **Stack cerrado.** Python 3.10+, LangChain/LangGraph, Gemini, ChromaDB, FastAPI, Pydantic, SQLModel, PostgreSQL, Docker, Render, Streamlit y pytest. Fuera: Kubernetes, JWT/OAuth, Redis, Alembic, varias réplicas, checkpoint en Postgres. Dependencias nuevas, solo con spec y plan.
 12. **Estado.** El historial de producto vive en Postgres; el checkpoint del grafo sigue en memoria, así que el servicio corre con un solo proceso.
 13. **Git.** `main` es lo que despliega Render y nadie trabaja ahí; una rama por bloque hacia `develop`, PR revisada por otra persona, mínimo una por miembro y commits pequeños.
-14. **Idioma** *(pendiente de acordar con el equipo)*. Identificadores nuevos en inglés técnico neutro; mensajes y documentación en español; el código heredado no se renombra.
+14. **Idioma.** Mensajes, documentación y campos del contrato HTTP en español; identificadores internos nuevos en inglés técnico neutro; el código heredado no se renombra.
