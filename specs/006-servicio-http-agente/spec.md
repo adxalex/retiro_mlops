@@ -1,6 +1,6 @@
 # Spec 006 — Servicio HTTP del agente del Retiro
 
-> Estado: Borrador · Fecha: 2026-11-19
+> Estado: Aclarada · Fecha: 2026-11-19
 
 ## Contexto y objetivo
 El agente del Retiro (consulta → plan → decisión humana → respuesta final) solo se puede usar hoy desde la CLI y desde Streamlit, y nada de lo que ocurre en una conversación sobrevive a un reinicio. Queremos exponerlo como un servicio HTTP con un contrato estable para que cualquier cliente (el futuro front, Swagger, pruebas) lo use sin conocer su interior. El servicio protege las rutas con una clave, limita su uso, deja una traza por petición sin secretos y conserva en PostgreSQL el historial de los turnos cerrados de cada conversación.
@@ -42,10 +42,10 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 - RF-17: SI `POST /ask` no incluye `thread_id`, ENTONCES EL SISTEMA genera uno y lo devuelve en la respuesta.
 - RF-18: SI `pregunta` está vacía, solo contiene espacios o supera los 2000 caracteres, ENTONCES EL SISTEMA responde 422 y no ejecuta el agente.
 - RF-19: SI `thread_id` está vacío, supera los 64 caracteres o contiene espacios, ENTONCES EL SISTEMA responde 422 en `POST /ask`, `POST /approve` y `GET /threads/{thread_id}/messages`.
-- RF-20: CUANDO el turno produce un plan que requiere decisión humana, EL SISTEMA responde con `pendiente_hitl=true` y `done=false`.
+- RF-20: CUANDO la petición incluye `auto_aprobar=false` y el turno produce un plan, EL SISTEMA responde con `pendiente_hitl=true` y `done=false` y espera una decisión humana.
 - RF-21: SI el `thread_id` ya tiene un plan pendiente de decisión, ENTONCES EL SISTEMA responde 409 a un nuevo `POST /ask` y no ejecuta el agente.
 - RF-22: SI llega una petición para un `thread_id` que ya tiene otra petición en curso, ENTONCES EL SISTEMA responde 409 a la segunda.
-- RF-23: SI la petición no incluye `auto_aprobar`, ENTONCES EL SISTEMA lo trata como [NECESITA ACLARACIÓN: ¿`true` (decisión del equipo) o `false`? La constitución §5 exige que `auto_aprobar=true` lo pida el cliente de forma explícita].
+- RF-23: SI la petición no incluye `auto_aprobar`, ENTONCES EL SISTEMA lo trata como `true`.
 - RF-24: DONDE la petición incluye `auto_aprobar=true` y el turno genera un plan, EL SISTEMA lo aprueba sin decisión humana, lo guarda con decisión "aprobado" y comentario vacío, y responde con `done=true`.
 - RF-25: SI `auto_aprobar` es `true` y el turno no genera ningún plan, ENTONCES `auto_aprobar` no tiene efecto.
 
@@ -57,8 +57,8 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 - RF-30: DONDE `POST /approve` incluye `comentario`, EL SISTEMA lo guarda con el turno.
 
 ### Historial
-- RF-31: CUANDO un turno se cierra, EL SISTEMA guarda en PostgreSQL su `thread_id`, la pregunta, la respuesta, el plan, la decisión ("aprobado", "rechazado" o ninguna), el comentario y la fecha.
-- RF-32: CUANDO se rechaza un plan, EL SISTEMA guarda el turno con la pregunta y con la respuesta y el plan que devolvió `/ask`, marcado como "rechazado" y con el comentario.
+- RF-31: CUANDO un turno se cierra, EL SISTEMA guarda en PostgreSQL su `thread_id`, la pregunta, la respuesta del agente (que ya incluye la propuesta), la decisión ("aprobado", "rechazado" o ninguna), el comentario y la fecha.
+- RF-32: CUANDO se rechaza un plan, EL SISTEMA guarda el turno con la pregunta y con la respuesta que devolvió `/ask`, marcado como "rechazado" y con el comentario.
 - RF-33: EL SISTEMA no guarda en el historial los turnos con plan pendiente de decisión ni los que terminan en error.
 - RF-34: CUANDO llega `GET /threads/{thread_id}/messages` para un `thread_id` con turnos cerrados, EL SISTEMA responde 200 con una lista cronológica, del más antiguo al más reciente y sin paginación, cuyos elementos tienen `role` ("user" o "assistant"), `content` y `created_at`.
 - RF-35: EN los elementos con `role` "assistant", EL SISTEMA incluye además `decision` ("aprobado", "rechazado" o `null`) y `comentario` (o `null`).
@@ -72,7 +72,7 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 ## Requisitos no funcionales
 - **Seguridad**: la `api_key`, la cadena de conexión y los límites (peticiones por minuto, 60 s de espera) se leen de la configuración; ninguno se escribe en el repositorio. Como la `api_key` viaja en la cadena de consulta, RF-39 abarca también los logs de acceso del propio servidor.
 - **Límites de entrada**: `pregunta` de 1 a 2000 caracteres, `comentario` de hasta 500 y `thread_id` de 1 a 64 caracteres sin espacios.
-- **Idioma**: mensajes de error en español (constitución §14).
+- **Idioma**: mensajes de error en español; campos de dominio del contrato en español (`pregunta`, `respuesta`, `plan`, `decision`, `comentario`) y en inglés los que fija el enunciado o FastAPI (`role`, `content`, `detail`) y los técnicos (`created_at`, `status`, `storage`, `db`), según la constitución §14.
 - **Despliegue**: un único proceso del servicio, porque el estado de los planes pendientes vive en memoria (constitución §12).
 - **Pruebas**: toda la verificación se hace sin API externa ni red, con dobles del agente y una base de datos de prueba (constitución §9).
 
@@ -85,6 +85,7 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 - Rechazo: `/approve` devuelve `done=false` porque el núcleo del agente no cambia (spec 003), pero el turno se guarda como cerrado (RF-27, RF-32).
 - Tras un 504 no se guarda nada y el estado del hilo no está garantizado; el cliente debe empezar con otro `thread_id` (RF-11).
 - Fallo de guardado en `/approve`: el plan ya se aplicó en el agente, pero el cliente recibe 503 y el turno no queda en el historial. Es un límite conocido y se documenta en el informe (RF-12).
+- Sin `auto_aprobar` el plan se aprueba solo; para esperar decisión humana el cliente debe enviar `auto_aprobar=false` (RF-20, RF-23).
 - Dos peticiones simultáneas para el mismo `thread_id`: la segunda recibe 409 (RF-22).
 - Petición con `api_key` válida y cuerpo no válido: cuenta para el límite aunque acabe en 422 (RF-9).
 - Orden de comprobaciones: 503, 401, 429, 422 y lógica de la ruta (RF-10).
@@ -100,11 +101,9 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 
 ## Criterios de finalización
 - Todos los RF con test en verde (`pytest`), sin API ni red.
-- Demo manual en Swagger: `/ask` → plan pendiente → `/approve` → `/threads/{thread_id}/messages` con el turno guardado.
+- Demo manual en Swagger: `/ask` con `auto_aprobar=false` → plan pendiente → `/approve` → `/threads/{thread_id}/messages` con el turno guardado.
 - Comprobación manual de 401, 429 y de que ningún log contiene la `api_key`.
 - El límite de RF-12 para `/approve` queda documentado en el informe.
 
 ## Dudas abiertas
-- [NECESITA ACLARACIÓN: constitución §5. El equipo quiere `auto_aprobar=true` por defecto, pero la constitución dice que solo se aprueba sin humano si el cliente lo pide de forma explícita y que el front siempre decide. ¿Se cambia el valor por defecto a `false` o se modifica la constitución?]
-- [NECESITA ACLARACIÓN: constitución §14. Los campos que fija la guía (`role`, `content`, `created_at`, `status`, `storage`, `db`, `detail`) están en inglés y §14 pide los campos del contrato en español. ¿Prevalece el enunciado (§1) y se añade la excepción a §14?]
-- [NECESITA ACLARACIÓN: los elementos del historial solo tienen `content`; el plan de un turno se guarda (RF-31, RF-32) pero ¿cómo se devuelve? ¿Dentro de `content` o se queda sin exponer?]
+Ninguna.
