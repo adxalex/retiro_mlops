@@ -6,7 +6,7 @@ Principios innegociables para toda spec, plan, tarea y línea de código. Si una
 2. **La spec manda sobre el código.** El contrato HTTP (rutas, bodies y códigos) se escribe y aprueba antes de implementarlo; si cambia el comportamiento, primero se cambia la spec.
 3. **Anclado al corpus.** El RAG responde solo con lo recuperado y se abstiene sin evidencia; el agente no inventa datos que deba aportar una tool.
 4. **El modelo propone, Python decide.** La allowlist de tools, la validación de argumentos, los límites y el cierre del plan (`done`) se deciden en código, nunca solo por el LLM.
-5. **HITL obligatorio.** Un plan solo se cierra con una decisión humana. Única excepción: que el cliente pida `auto_aprobar=true` de forma explícita (pruebas en Swagger); el front siempre decide con Aprobar o Rechazar.
+5. **HITL obligatorio.** Un plan solo se cierra con una decisión humana. Excepción fijada por el enunciado: la API acepta `auto_aprobar`, que vale `true` por defecto (comodidad en Swagger) y cierra el plan sin decisión; el front siempre envía `auto_aprobar=false` y decide con Aprobar o Rechazar.
 6. **Capas separadas.** API, agente, datos y front van en capas distintas: la API solo llama a `procesar_turno` y `aprobar_plan`; el front es un cliente HTTP y no importa el grafo.
 7. **Tools predecibles.** Toda tool devuelve `ok`, `error` o `blocked`, nunca lanza excepciones y deja traza; una API externa siempre tiene fallback local.
 8. **Trazabilidad sin secretos.** Cada petición protegida deja un log con método, ruta, `thread_id`, `duration_ms` y status; nunca claves ni la connection string.
@@ -15,4 +15,4 @@ Principios innegociables para toda spec, plan, tarea y línea de código. Si una
 11. **Stack cerrado.** Python 3.10+, LangChain/LangGraph, Gemini, ChromaDB, FastAPI, Pydantic, SQLModel, PostgreSQL, Docker, Render, Streamlit y pytest. Fuera: Kubernetes, JWT/OAuth, Redis, Alembic, varias réplicas, checkpoint en Postgres. Dependencias nuevas, solo con spec y plan.
 12. **Estado.** El historial de producto vive en Postgres; el checkpoint del grafo sigue en memoria, así que el servicio corre con un solo proceso.
 13. **Git.** `main` es lo que despliega Render y nadie trabaja ahí; una rama por bloque hacia `develop`, PR revisada por otra persona, mínimo una por miembro y commits pequeños.
-14. **Idioma** *(pendiente de acordar con el equipo)*. Identificadores nuevos en inglés técnico neutro; mensajes y documentación en español; el código heredado no se renombra.
+14. **Idioma.** Mensajes y documentación en español. En el contrato HTTP, los campos de dominio van en español (`pregunta`, `respuesta`, `plan`, `decision`, `comentario`); se conservan en inglés los que fija el enunciado o el estándar de FastAPI (`role`, `content`, `detail`) y los técnicos de infraestructura (`created_at`, `status`, `storage`, `db`). Identificadores internos nuevos en inglés técnico neutro; el código heredado no se renombra.

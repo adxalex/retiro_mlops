@@ -11,3 +11,7 @@ pandas
 requests
 fonttools
 langgraph
+fastapi
+uvicorn
+sqlmodel
+psycopg[binary]

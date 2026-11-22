@@ -69,8 +69,11 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 - RF-38: CUANDO atiende una petición a una ruta protegida, sea cual sea su resultado, EL SISTEMA escribe un log con método, ruta sin la cadena de consulta, `thread_id`, `duration_ms` y código de estado.
 - RF-39: EL SISTEMA no incluye la `api_key` ni la cadena de conexión a la base de datos en ningún log del servicio, en las respuestas ni en los mensajes de error.
 
+### Acceso desde navegadores
+- RF-40: EL SISTEMA permitirá peticiones desde los orígenes listados en `CORS_ORIGINS`.
+
 ## Requisitos no funcionales
-- **Seguridad**: la `api_key`, la cadena de conexión y los límites (peticiones por minuto, 60 s de espera) se leen de la configuración; ninguno se escribe en el repositorio. Como la `api_key` viaja en la cadena de consulta, RF-39 abarca también los logs de acceso del propio servidor.
+- **Seguridad**: la `api_key`, la cadena de conexión, los límites (peticiones por minuto, 60 s de espera) y los orígenes permitidos (`CORS_ORIGINS`) se leen de la configuración; ninguno se escribe en el repositorio. Como la `api_key` viaja en la cadena de consulta, RF-39 abarca también los logs de acceso del propio servidor.
 - **Límites de entrada**: `pregunta` de 1 a 2000 caracteres, `comentario` de hasta 500 y `thread_id` de 1 a 64 caracteres sin espacios.
 - **Idioma**: mensajes de error en español; campos de dominio del contrato en español (`pregunta`, `respuesta`, `plan`, `decision`, `comentario`) y en inglés los que fija el enunciado o FastAPI (`role`, `content`, `detail`) y los técnicos (`created_at`, `status`, `storage`, `db`), según la constitución §14.
 - **Despliegue**: un único proceso del servicio, porque el estado de los planes pendientes vive en memoria (constitución §12).
@@ -89,6 +92,7 @@ El agente del Retiro (consulta → plan → decisión humana → respuesta final
 - Dos peticiones simultáneas para el mismo `thread_id`: la segunda recibe 409 (RF-22).
 - Petición con `api_key` válida y cuerpo no válido: cuenta para el límite aunque acabe en 422 (RF-9).
 - Orden de comprobaciones: 503, 401, 429, 422 y lógica de la ruta (RF-10).
+- Petición desde un origen que no está en `CORS_ORIGINS`: no queda autorizada para ese origen (RF-40).
 
 ## Fuera de alcance
 - Docker, despliegue en Render y el front Streamlit.
