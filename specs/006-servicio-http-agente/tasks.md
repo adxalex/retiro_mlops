@@ -48,7 +48,7 @@ Orden de fusión en `develop`: PR-1 → (PR-2 → PR-3) y (PR-5 → PR-6 → PR-
 ---
 
 ## PR-1 · Configuración previa (Alex) — `feature/api-config`
-- [ ] **T0.** Configuración y dependencias. (RF-6, 8, 11, 39, 40)
+- [x] **T0.** Configuración y dependencias. (RF-6, 8, 11, 39, 40)
       Tests primero: `tests/test_config_api.py` (valores por defecto 30, 60 y `CORS_ORIGINS` vacío; lectura del entorno con `monkeypatch`; parseo de `CORS_ORIGINS` separado por comas con espacios recortados). Después: `config.py` con `API_KEY`, `DATABASE_URL`, `RATE_LIMIT_PER_MINUTE`, `ASK_TIMEOUT_SECONDS`, `CORS_ORIGINS` y las constantes fijas (2000/500/64, timeout de conexión, rutas protegidas); `requirements.txt` (fastapi, uvicorn, sqlmodel, psycopg[binary]); `requirements-dev.txt` (httpx); `.env.example` solo con los nombres.
       Hecho cuando: `pytest tests/test_config_api.py -q` en verde, `pip install -r requirements-dev.txt` sin errores y `.env.example` sin valores.
 

@@ -129,3 +129,26 @@ VARIABLES_SECRETAS = ("GEMINI_API_KEY", "GOOGLE_API_KEY", "AEMET_API_KEY")
 MASCARA = "***"
 # Campos de cada evento de traza que muestra el panel de depuración.
 CAMPOS_TRAZA = ("ts", "origen", "nombre", "status", "preview")
+
+# --- API HTTP ---
+# Se leen del entorno: en local desde .env y en Render desde su panel.
+API_KEY = os.getenv("API_KEY", "")
+DATABASE_URL = os.getenv("DATABASE_URL", "")
+# "or" cubre también el valor vacío de un .env copiado de .env.example.
+RATE_LIMIT_PER_MINUTE = int(os.getenv("RATE_LIMIT_PER_MINUTE") or "30")
+ASK_TIMEOUT_SECONDS = float(os.getenv("ASK_TIMEOUT_SECONDS") or "60")
+# Orígenes permitidos por CORS, separados por comas; vacío = ninguno.
+CORS_ORIGINS = [
+    origen.strip()
+    for origen in os.getenv("CORS_ORIGINS", "").split(",")
+    if origen.strip()
+]
+
+# Límites de entrada del contrato HTTP.
+PREGUNTA_MAX_CHARS = 2000
+COMENTARIO_MAX_CHARS = 500
+THREAD_ID_MAX_CHARS = 64
+
+DB_CONNECT_TIMEOUT_SECONDS = 3  # espera máxima de conexión a PostgreSQL
+# Prefijos de ruta que exigen api_key.
+RUTAS_PROTEGIDAS = ("/ask", "/approve", "/threads/")
