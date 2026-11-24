@@ -106,13 +106,17 @@ class SecurityGateMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Las rutas públicas no necesitan autenticación.
-        if request.url.path not in self.protected_paths:
+        if not any(
+            request.url.path == path
+            or (path.endswith("/") and request.url.path.startswith(path))
+            for path in self.protected_paths
+        ):
             return await call_next(request)
 
         start_time = time.perf_counter()
 
         # 1. Comprobar si la API key está configurada.
-        if not self.api_key:
+        if not self.api_key or not self.api_key.strip():
             response = JSONResponse(
                 status_code=503,
                 content={"detail": "Servicio no configurado"},

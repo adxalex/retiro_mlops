@@ -10,6 +10,10 @@ from security import (
     SecurityGateMiddleware,
 )
 
+import pytest
+import config
+from api import create_app
+
 
 API_KEY = "clave-super-secreta-de-prueba"
 
@@ -99,3 +103,36 @@ def test_filtro_enmascara_api_key_en_logs_de_acceso():
 
     assert "clave-super-secreta" not in mensaje
     assert "api_key=***" in mensaje
+
+
+def test_app_real_registra_log_por_peticion_protegida(
+    caplog,
+    monkeypatch,
+    in_memory_repo,
+    fake_agent,
+):
+    api_key = "clave-prueba-log"
+    monkeypatch.setattr(config, "API_KEY", api_key)
+
+    app = create_app(repo=in_memory_repo, agent=fake_agent)
+
+    with caplog.at_level(logging.INFO, logger="security"):
+        with TestClient(app) as client:
+            response = client.get(
+                "/threads/hilo-prueba",
+                params={"api_key": api_key},
+            )
+
+    assert response.status_code != 401
+
+    registros = [
+        record
+        for record in caplog.records
+        if record.name == "security"
+    ]
+
+    assert len(registros) == 1
+    assert registros[0].method == "GET"
+    assert registros[0].path == "/threads/hilo-prueba"
+    assert registros[0].status == response.status_code
+    assert api_key not in caplog.text
