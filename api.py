@@ -1,5 +1,6 @@
 """Aplicación FastAPI del agente del Parque del Retiro."""
 
+import asyncio
 import logging
 import uuid
 
@@ -46,6 +47,9 @@ def create_app(repo=None, agent=None):
     
     # Hilos que tienen un plan pendiente de aprobación.
     app.state.pending_threads = set()
+
+    # Hilos que tienen una petición en ejecución.
+    app.state.in_flight_threads = set()
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -137,25 +141,69 @@ def create_app(repo=None, agent=None):
         }
 
     @app.post("/ask", response_model=AskResponse)
-    def ask(request: AskRequest):
-        """Procesa una pregunta y guarda el turno en el repositorio."""
+    async def ask(request: AskRequest):
+        """Procesa una pregunta con timeout y reserva por hilo."""
 
         thread_id = request.thread_id or uuid.uuid4().hex
-       
-        # Comprobamos si el hilo ya tiene un plan pendiente.
-        if thread_id in app.state.pending_threads:
-            from fastapi import HTTPException
 
+        from fastapi import HTTPException
+
+        # Comprobamos si el hilo tiene un plan pendiente de aprobación.
+        if thread_id in app.state.pending_threads:
             raise HTTPException(
                 status_code=409,
                 detail="El hilo tiene un plan pendiente de aprobación",
             )
 
-        # Procesamos la pregunta con el agente.
-        resultado = agent.procesar_turno(
-            texto=request.pregunta,
-            thread_id=thread_id,
+        # Comprobamos si ya hay otra petición ejecutándose en este hilo.
+        if thread_id in app.state.in_flight_threads:
+            raise HTTPException(
+                status_code=409,
+                detail="Ya hay una petición en ejecución para este hilo",
+            )
+
+        # Reservamos el hilo antes de iniciar el agente.
+        app.state.in_flight_threads.add(thread_id)
+
+        # Ejecutamos el agente en un hilo independiente.
+        tarea_agente = asyncio.create_task(
+            asyncio.to_thread(
+                agent.procesar_turno,
+                texto=request.pregunta,
+                thread_id=thread_id,
+            )
         )
+
+        try:
+            resultado = await asyncio.wait_for(
+                asyncio.shield(tarea_agente),
+                timeout=config.ASK_TIMEOUT_SECONDS,
+            )
+
+        except asyncio.TimeoutError:
+            # El agente continúa ejecutándose después del timeout.
+            # Liberamos la reserva únicamente cuando termine realmente.
+            def liberar_reserva(tarea):
+                app.state.in_flight_threads.discard(thread_id)
+
+                # Recuperamos posibles excepciones de la tarea.
+                if not tarea.cancelled():
+                    tarea.exception()
+
+            tarea_agente.add_done_callback(liberar_reserva)
+
+            raise HTTPException(
+                status_code=504,
+                detail="Tiempo de espera agotado al procesar la consulta",
+            )
+
+        except Exception:
+            # Si el agente falla, liberamos inmediatamente la reserva.
+            app.state.in_flight_threads.discard(thread_id)
+            raise
+
+        # El agente ha terminado correctamente.
+        app.state.in_flight_threads.discard(thread_id)
 
         # Si el agente devuelve un error, no guardamos el turno.
         if resultado.get("error"):
@@ -167,12 +215,10 @@ def create_app(repo=None, agent=None):
             resultado.get("pendiente_aprobacion", False)
         )
 
-
         # Si existe un plan pendiente, comprobamos si debe autoaprobarse.
         if pendiente_aprobacion:
 
             if request.auto_aprobar:
-                # Aprobamos automáticamente el plan.
                 resultado_aprobacion = agent.aprobar_plan(
                     thread_id=thread_id,
                     aprobado=True,
@@ -187,7 +233,6 @@ def create_app(repo=None, agent=None):
                 )
                 plan = resultado_aprobacion.get("plan", []) or []
 
-                # Guardamos el turno como aprobado.
                 repo.save(
                     thread_id=thread_id,
                     question=request.pregunta,
@@ -217,7 +262,6 @@ def create_app(repo=None, agent=None):
                 "error": None,
             }
 
-
         # Si no hay aprobación pendiente, guardamos el turno.
         repo.save(
             thread_id=thread_id,
@@ -235,5 +279,5 @@ def create_app(repo=None, agent=None):
             "pendiente_hitl": False,
             "error": None,
         }
-    
+
     return app
