@@ -1,4 +1,6 @@
-
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event
+from time import monotonic, sleep
 from unittest.mock import Mock
 
 from fastapi.testclient import TestClient
@@ -279,3 +281,199 @@ def test_ask_sin_plan_no_activa_auto_aprobacion(
 
     assert len(in_memory_repo.turnos) == 1
     assert in_memory_repo.turnos[0].decision is None
+
+def test_ask_timeout_devuelve_504_y_no_guarda_turno(
+    api_client,
+    in_memory_repo,
+    fake_agent,
+    monkeypatch,
+):
+    import config
+
+    monkeypatch.setattr(config, "ASK_TIMEOUT_SECONDS", 0.1)
+
+    agente_iniciado = Event()
+    liberar_agente = Event()
+
+    def agente_bloqueado(texto, thread_id, imagen=None):
+        agente_iniciado.set()
+        liberar_agente.wait(timeout=3)
+
+        return {
+            "thread_id": thread_id,
+            "respuesta": "Respuesta de prueba",
+            "plan": [],
+            "pendiente_aprobacion": False,
+            "done": True,
+            "traza": [],
+            "error": None,
+        }
+
+    fake_agent.procesar_turno = Mock(side_effect=agente_bloqueado)
+
+    try:
+        response = api_client.post(
+            "/ask?api_key=test-key",
+            json={
+                "pregunta": "¿Qué puedo visitar?",
+                "thread_id": "hilo-timeout-123",
+            },
+        )
+
+        assert response.status_code == 504
+        assert agente_iniciado.is_set()
+        assert len(in_memory_repo.turnos) == 0
+
+    finally:
+        liberar_agente.set()
+
+
+def test_ask_segunda_peticion_mismo_hilo_devuelve_409(
+    api_client,
+    in_memory_repo,
+    fake_agent,
+    monkeypatch,
+):
+    import config
+
+    monkeypatch.setattr(config, "ASK_TIMEOUT_SECONDS", 3)
+
+    agente_iniciado = Event()
+    liberar_agente = Event()
+
+    def agente_bloqueado(texto, thread_id, imagen=None):
+        agente_iniciado.set()
+        liberar_agente.wait(timeout=3)
+
+        return {
+            "thread_id": thread_id,
+            "respuesta": "Respuesta de prueba",
+            "plan": [],
+            "pendiente_aprobacion": False,
+            "done": True,
+            "traza": [],
+            "error": None,
+        }
+
+    fake_agent.procesar_turno = Mock(side_effect=agente_bloqueado)
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            primera_peticion = executor.submit(
+                api_client.post,
+                "/ask?api_key=test-key",
+                json={
+                    "pregunta": "Organiza una visita",
+                    "thread_id": "hilo-concurrente-123",
+                },
+            )
+
+            assert agente_iniciado.wait(timeout=2)
+
+            segunda_peticion = api_client.post(
+                "/ask?api_key=test-key",
+                json={
+                    "pregunta": "Añade otro lugar",
+                    "thread_id": "hilo-concurrente-123",
+                },
+            )
+
+            assert segunda_peticion.status_code == 409
+            fake_agent.procesar_turno.assert_called_once()
+
+            liberar_agente.set()
+
+            primera_respuesta = primera_peticion.result(timeout=3)
+
+            assert primera_respuesta.status_code == 200
+
+    finally:
+        liberar_agente.set()
+
+
+def test_ask_reserva_se_libera_cuando_agente_termina(
+    api_client,
+    in_memory_repo,
+    fake_agent,
+    monkeypatch,
+):
+    import config
+
+    monkeypatch.setattr(config, "ASK_TIMEOUT_SECONDS", 0.1)
+
+    agente_iniciado = Event()
+    liberar_agente = Event()
+    agente_terminado = Event()
+
+    def agente_controlado(texto, thread_id, imagen=None):
+        if fake_agent.procesar_turno.call_count == 1:
+            agente_iniciado.set()
+            liberar_agente.wait(timeout=3)
+            agente_terminado.set()
+
+        return {
+            "thread_id": thread_id,
+            "respuesta": "Respuesta de prueba",
+            "plan": [],
+            "pendiente_aprobacion": False,
+            "done": True,
+            "traza": [],
+            "error": None,
+        }
+
+    fake_agent.procesar_turno = Mock(side_effect=agente_controlado)
+
+    try:
+        primera_respuesta = api_client.post(
+            "/ask?api_key=test-key",
+            json={
+                "pregunta": "Organiza una visita",
+                "thread_id": "hilo-liberacion-123",
+            },
+        )
+
+        assert primera_respuesta.status_code == 504
+        assert agente_iniciado.is_set()
+        assert len(in_memory_repo.turnos) == 0
+
+        # El agente sigue trabajando: el hilo debe continuar reservado.
+        segunda_respuesta = api_client.post(
+            "/ask?api_key=test-key",
+            json={
+                "pregunta": "Añade otro lugar",
+                "thread_id": "hilo-liberacion-123",
+            },
+        )
+
+        assert segunda_respuesta.status_code == 409
+        assert fake_agent.procesar_turno.call_count == 1
+
+        # Permitimos que el agente termine realmente.
+        liberar_agente.set()
+        assert agente_terminado.wait(timeout=2)
+
+        # Esperamos a que se libere la reserva.
+        limite = monotonic() + 2
+        tercera_respuesta = None
+
+        while monotonic() < limite:
+            tercera_respuesta = api_client.post(
+                "/ask?api_key=test-key",
+                json={
+                    "pregunta": "Organiza una nueva visita",
+                    "thread_id": "hilo-liberacion-123",
+                },
+            )
+
+            if tercera_respuesta.status_code != 409:
+                break
+
+            sleep(0.01)
+
+        assert tercera_respuesta is not None
+        assert tercera_respuesta.status_code == 200
+        assert fake_agent.procesar_turno.call_count == 2
+        assert len(in_memory_repo.turnos) == 1
+
+    finally:
+        liberar_agente.set()
