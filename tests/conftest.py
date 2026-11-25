@@ -90,10 +90,26 @@ class FakeAgent:
     """Agente falso para probar la API sin ejecutar el agente real."""
 
     def procesar_turno(self, texto, thread_id, imagen=None):
-        return {}
+        return {
+            "thread_id": thread_id,
+            "respuesta": "Respuesta de prueba",
+            "plan": [],
+            "pendiente_aprobacion": False,
+            "done": True,
+            "traza": [],
+            "error": None,
+        }
 
     def aprobar_plan(self, thread_id, aprobado, comentario=""):
-        return {}
+        return {
+            "thread_id": thread_id,
+            "respuesta": "Respuesta de prueba",
+            "plan": [],
+            "pendiente_aprobacion": False,
+            "done": True,
+            "traza": [],
+            "error": None,
+        }
 
 
 @pytest.fixture
@@ -112,9 +128,13 @@ def in_memory_repo_roto():
 
 
 @pytest.fixture
-def api_client(in_memory_repo, fake_agent):
-    from api import create_app
+def api_client(in_memory_repo, fake_agent, monkeypatch):
+    import config
 
+    # API Key ficticia exclusiva para los tests
+    monkeypatch.setattr(config, "API_KEY", "test-key")
+
+    from api import create_app
     app = create_app(repo=in_memory_repo, agent=fake_agent)
 
     with TestClient(app) as client:

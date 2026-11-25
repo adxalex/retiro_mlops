@@ -1,16 +1,16 @@
-
 """Aplicación FastAPI del agente del Parque del Retiro."""
 
-from fastapi import FastAPI
+import logging
+import uuid
+
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
-import logging
-
 import config
+from schemas import AskRequest, AskResponse
 from security import (
     ApiKeyMaskingFilter,
     RateLimiter,
@@ -43,6 +43,9 @@ def create_app(repo=None, agent=None):
         openapi_url="/openapi.json",
         redoc_url=None,
     )
+    
+    # Hilos que tienen un plan pendiente de aprobación.
+    app.state.pending_threads = set()
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(
@@ -133,4 +136,104 @@ def create_app(repo=None, agent=None):
             "db": db_status,
         }
 
+    @app.post("/ask", response_model=AskResponse)
+    def ask(request: AskRequest):
+        """Procesa una pregunta y guarda el turno en el repositorio."""
+
+        thread_id = request.thread_id or uuid.uuid4().hex
+       
+        # Comprobamos si el hilo ya tiene un plan pendiente.
+        if thread_id in app.state.pending_threads:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=409,
+                detail="El hilo tiene un plan pendiente de aprobación",
+            )
+
+        # Procesamos la pregunta con el agente.
+        resultado = agent.procesar_turno(
+            texto=request.pregunta,
+            thread_id=thread_id,
+        )
+
+        # Si el agente devuelve un error, no guardamos el turno.
+        if resultado.get("error"):
+            raise RuntimeError("Error al procesar la consulta")
+
+        respuesta = resultado.get("respuesta", "") or ""
+        plan = resultado.get("plan", []) or []
+        pendiente_aprobacion = bool(
+            resultado.get("pendiente_aprobacion", False)
+        )
+
+
+        # Si existe un plan pendiente, comprobamos si debe autoaprobarse.
+        if pendiente_aprobacion:
+
+            if request.auto_aprobar:
+                # Aprobamos automáticamente el plan.
+                resultado_aprobacion = agent.aprobar_plan(
+                    thread_id=thread_id,
+                    aprobado=True,
+                    comentario="",
+                )
+
+                if resultado_aprobacion.get("error"):
+                    raise RuntimeError("Error al aprobar el plan")
+
+                respuesta = (
+                    resultado_aprobacion.get("respuesta", "") or ""
+                )
+                plan = resultado_aprobacion.get("plan", []) or []
+
+                # Guardamos el turno como aprobado.
+                repo.save(
+                    thread_id=thread_id,
+                    question=request.pregunta,
+                    answer=respuesta,
+                    decision="aprobado",
+                    comment="",
+                )
+
+                return {
+                    "respuesta": respuesta,
+                    "plan": plan,
+                    "thread_id": thread_id,
+                    "done": bool(resultado_aprobacion.get("done", False)),
+                    "pendiente_hitl": False,
+                    "error": None,
+                }
+
+            # Si no se autoaprueba, dejamos el plan pendiente.
+            app.state.pending_threads.add(thread_id)
+
+            return {
+                "respuesta": respuesta,
+                "plan": plan,
+                "thread_id": thread_id,
+                "done": False,
+                "pendiente_hitl": True,
+                "error": None,
+            }
+
+
+        # Si no hay aprobación pendiente, guardamos el turno.
+        repo.save(
+            thread_id=thread_id,
+            question=request.pregunta,
+            answer=respuesta,
+            decision=None,
+            comment=None,
+        )
+
+        return {
+            "respuesta": respuesta,
+            "plan": plan,
+            "thread_id": thread_id,
+            "done": bool(resultado.get("done", False)),
+            "pendiente_hitl": False,
+            "error": None,
+        }
+    
     return app
