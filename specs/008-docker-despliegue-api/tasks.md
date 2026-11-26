@@ -12,7 +12,7 @@
       Implementar en `Dockerfile`: imagen base `python:3.10-slim`, directorio de trabajo `/app`, copia de `requirements.txt`, instalación con `pip --no-cache-dir` y copia del contexto versionado necesario.
       Hecho cuando: `tests/test_docker_config.py::test_dockerfile_usa_python_310` y `tests/test_docker_config.py::test_instala_requirements` pasan; no se copia `chroma/` ni se incorpora un índice local.
 
-- [ ] T3. Configurar el arranque Uvicorn, el puerto y el único proceso. (RF-3 a RF-7)
+- [x] T3. Configurar el arranque Uvicorn, el puerto y el único proceso. (RF-3 a RF-7)
       Depende de: T2.
       Tests primero: completar las aserciones estáticas para `api:app`, `--host 0.0.0.0`, lectura de `PORT` con fallback `8000`, `--workers 1` y `--no-access-log`.
       Implementar el comando de arranque sin declarar manualmente `PORT` en una configuración de Render. Mantener un único worker Uvicorn por contenedor.
