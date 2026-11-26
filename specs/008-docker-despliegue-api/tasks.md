@@ -7,7 +7,7 @@
       Tests primero: crear `tests/test_docker_config.py` con lecturas de `Dockerfile`, `.dockerignore` y documentación. Los casos iniciales cubren base Python, instalación de requisitos, Uvicorn, host, puerto, worker, access log, exclusiones y variables de entorno. Mientras no existan los archivos, deben fallar.
       Hecho cuando: `pytest tests/test_docker_config.py -q` falla por implementación ausente y queda listo para pasar en las tareas siguientes.
 
-- [ ] T2. Crear la base de la imagen Python e instalar dependencias. (RF-1, RF-2)
+- [x] T2. Crear la base de la imagen Python e instalar dependencias. (RF-1, RF-2)
       Depende de: T1.
       Implementar en `Dockerfile`: imagen base `python:3.10-slim`, directorio de trabajo `/app`, copia de `requirements.txt`, instalación con `pip --no-cache-dir` y copia del contexto versionado necesario.
       Hecho cuando: `tests/test_docker_config.py::test_dockerfile_usa_python_310` y `tests/test_docker_config.py::test_instala_requirements` pasan; no se copia `chroma/` ni se incorpora un índice local.
