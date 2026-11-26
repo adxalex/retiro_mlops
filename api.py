@@ -11,7 +11,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import config
-from schemas import AskRequest, AskResponse
+from schemas import AskRequest, AskResponse, ApproveRequest
 from security import (
     ApiKeyMaskingFilter,
     RateLimiter,
@@ -284,5 +284,77 @@ def create_app(repo=None, agent=None):
             "pendiente_hitl": False,
             "error": None,
         }
+
+    
+    @app.post("/approve", response_model=AskResponse)
+    def approve(request: ApproveRequest):
+        """Aprueba o rechaza un plan pendiente."""
+
+        from fastapi import HTTPException
+
+        thread_id = request.thread_id
+
+        # No permitimos aprobar mientras haya una petición en ejecución.
+        if thread_id in app.state.in_flight_threads:
+            raise HTTPException(
+                status_code=409,
+                detail="Ya hay una petición en ejecución para este hilo",
+            )
+
+        # Recuperamos los datos del turno pendiente.
+        turno_pendiente = app.state.pending_threads.get(thread_id)
+
+        if turno_pendiente is None:
+            raise HTTPException(
+                status_code=409,
+                detail="El hilo no tiene un plan pendiente de aprobación",
+            )
+
+        comentario = request.comentario or ""
+
+        # Enviamos la decisión al agente.
+        resultado = agent.aprobar_plan(
+            thread_id=thread_id,
+            aprobado=request.aprobado,
+            comentario=comentario,
+        )
+
+        if resultado.get("error"):
+            raise RuntimeError("Error al procesar la aprobación")
+
+        # Determinamos la decisión y la respuesta que guardaremos.
+        decision = "aprobado" if request.aprobado else "rechazado"
+
+        if request.aprobado:
+            respuesta_guardada = (
+                resultado.get("respuesta", "") or ""
+            )
+        else:
+            # Al rechazar, conservamos la respuesta original de /ask.
+            respuesta_guardada = turno_pendiente["answer"]
+
+        # Guardamos el turno una vez resuelta la aprobación.
+        repo.save(
+            thread_id=thread_id,
+            question=turno_pendiente["question"],
+            answer=respuesta_guardada,
+            decision=decision,
+            comment=comentario,
+        )
+
+        # El hilo deja de tener un plan pendiente.
+        app.state.pending_threads.pop(thread_id)
+
+        return {
+            "respuesta": resultado.get("respuesta", "") or "",
+            "plan": resultado.get("plan", []) or [],
+            "thread_id": thread_id,
+            "done": bool(resultado.get("done", False)),
+            "pendiente_hitl": bool(
+                resultado.get("pendiente_aprobacion", False)
+            ),
+            "error": None,
+        }
+
     
     return app
