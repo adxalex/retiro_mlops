@@ -18,7 +18,7 @@
       Implementar el comando de arranque sin declarar manualmente `PORT` en una configuración de Render. Mantener un único worker Uvicorn por contenedor.
       Hecho cuando: `tests/test_docker_config.py::test_uvicorn_inicia_api_app`, `test_host_es_todos_los_interfaces`, `test_puerto_render_y_fallback`, `test_un_solo_worker` y `test_no_access_log` pasan.
 
-- [ ] T4. Crear el contexto Docker seguro. (RF-8, RF-9)
+- [x] T4. Crear el contexto Docker seguro. (RF-8, RF-9)
       Depende de: T1.
       Tests primero: completar las aserciones de `.dockerignore` para excluir `.git`, entornos virtuales, cachés, archivos temporales, tests, documentación, datos locales e secretos. Permitir `.env.example`.
       Implementar `.dockerignore` sin copiar `.env`, `.env.*` salvo `.env.example`, credenciales ni carpetas locales. No copiar automáticamente `chroma/`.
