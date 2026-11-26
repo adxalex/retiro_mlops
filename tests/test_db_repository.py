@@ -7,6 +7,9 @@ from sqlmodel import Session, SQLModel, create_engine, select
 from src.db import TurnRepository
 from src.models import Conversation, Turn
 
+from sqlalchemy import inspect
+from src.db import TurnRepository, make_repository
+
 
 @pytest.fixture
 def engine():
@@ -148,3 +151,92 @@ def test_varios_turnos_comparten_una_conversacion(repository, engine):
     assert len(conversations) == 1
     assert len(turns) == 2
     assert all(turn.thread_id == conversations[0].id for turn in turns)
+
+def test_ping_sano(engine):
+    repository = TurnRepository(engine)
+
+    assert repository.ping() is True
+
+def test_ping_motor_roto_no_lanza(tmp_path):
+    broken_path = tmp_path / "missing" / "database.db"
+
+    broken_engine = create_engine(
+        f"sqlite:///{broken_path.as_posix()}"
+    )
+
+    repository = TurnRepository(broken_engine)
+
+    try:
+        assert repository.ping() is False
+    finally:
+        broken_engine.dispose()
+
+def test_save_y_list_lanzan_con_motor_roto(tmp_path):
+    broken_path = tmp_path / "missing" / "database.db"
+
+    broken_engine = create_engine(
+        f"sqlite:///{broken_path.as_posix()}"
+    )
+
+    repository = TurnRepository(broken_engine)
+
+    try:
+        with pytest.raises(Exception):
+            repository.save(
+                "thread-error",
+                "Pregunta",
+                "Respuesta",
+                None,
+                None,
+            )
+
+        with pytest.raises(Exception):
+            repository.list("thread-error")
+
+    finally:
+        broken_engine.dispose()
+
+def test_tablas_se_crean_perezosamente():
+    lazy_engine = create_engine(
+        "sqlite://",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    try:
+        repository = TurnRepository(lazy_engine)
+
+        # Al crear el repositorio todavía no existen tablas.
+        assert inspect(lazy_engine).get_table_names() == []
+
+        # Primer uso: guardar un turno.
+        repository.save(
+            "thread-lazy",
+            "Pregunta",
+            "Respuesta",
+            None,
+            None,
+        )
+
+        # Ahora deben existir ambas tablas.
+        tables = inspect(lazy_engine).get_table_names()
+
+        assert "conversation" in tables
+        assert "turn" in tables
+
+    finally:
+        lazy_engine.dispose()
+
+def test_make_repository_usa_motor_configurado(monkeypatch, engine):
+    import src.db as db
+
+    monkeypatch.setattr(
+        db,
+        "make_engine",
+        lambda url=None: engine,
+    )
+
+    repository = make_repository()
+
+    assert isinstance(repository, TurnRepository)
+    assert repository.engine is engine
