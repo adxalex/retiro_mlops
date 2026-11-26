@@ -4,14 +4,19 @@ import asyncio
 import logging
 import uuid
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Path
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
 import config
-from schemas import AskRequest, AskResponse, ApproveRequest
+from schemas import (
+    AskRequest,
+    AskResponse,
+    ApproveRequest,
+    MessageResponse,
+)
 from security import (
     ApiKeyMaskingFilter,
     RateLimiter,
@@ -355,6 +360,58 @@ def create_app(repo=None, agent=None):
             ),
             "error": None,
         }
+
+
+    @app.get(
+        "/threads/{thread_id}/messages",
+        response_model=list[MessageResponse],
+    )
+    def get_thread_messages(
+        thread_id: str = Path(
+            min_length=1,
+            max_length=64,
+            pattern=r"^\S+$",
+        ),
+    ):
+        """Devuelve el historial de mensajes de un hilo."""
+
+        from fastapi import HTTPException
+
+        # Recuperamos los turnos guardados del hilo.
+        turnos = repo.list(thread_id)
+
+        # Si no hay turnos cerrados, el hilo no tiene historial.
+        if not turnos:
+            raise HTTPException(
+                status_code=404,
+                detail="No se encontraron mensajes para este hilo",
+            )
+
+        mensajes = []
+
+        # El repositorio devuelve los turnos cronológicamente.
+        for turno in turnos:
+            # Mensaje del usuario.
+            mensajes.append(
+                MessageResponse(
+                    role="user",
+                    content=turno.question,
+                    created_at=turno.created_at,
+                )
+            )
+
+            # Respuesta del asistente, con decisión y comentario.
+            mensajes.append(
+                MessageResponse(
+                    role="assistant",
+                    content=turno.answer,
+                    created_at=turno.created_at,
+                    decision=turno.decision,
+                    comentario=turno.comment,
+                )
+            )
+
+        return mensajes
 
     
     return app
