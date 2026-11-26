@@ -24,7 +24,7 @@
       Implementar `.dockerignore` sin copiar `.env`, `.env.*` salvo `.env.example`, credenciales ni carpetas locales. No copiar automáticamente `chroma/`.
       Hecho cuando: `tests/test_docker_config.py::test_dockerignore_excluye_archivos_locales` y `tests/test_docker_config.py::test_dockerignore_excluye_secretos` pasan.
 
-- [ ] T5. Preparar la configuración de producción mediante variables de entorno. (RF-10)
+- [x] T5. Preparar la configuración de producción mediante variables de entorno. (RF-10)
       Depende de: T3.
       Tests primero: completar `tests/test_docker_config.py` para comprobar que `README.md` documenta `API_KEY`, `DATABASE_URL`, `GEMINI_API_KEY` o `GOOGLE_API_KEY`, `AEMET_API_KEY`, `CORS_ORIGINS`, límites y puerto, sin contener valores reales.
       Implementar solo documentación/configuración declarativa; no añadir secretos ni leer `.env` dentro de la imagen.

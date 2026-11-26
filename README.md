@@ -63,6 +63,23 @@ cp .env.example .env        # en Windows: copy .env.example .env
 | `GEMINI_API_KEY` | LLM y embeddings. El RAG también acepta `GOOGLE_API_KEY`, pero `describir_imagen` solo lee `GEMINI_API_KEY`. |
 | `AEMET_API_KEY` | Datos de AEMET. Sin ella, `api_dominio` usa el JSON local de respaldo. |
 
+### Variables de producción
+
+La API Docker recibe su configuración mediante variables de entorno; no las incorpora a la imagen ni lee un archivo `.env` del contenedor:
+
+| Variable | Uso |
+|---|---|
+| `API_KEY` | Protege las rutas HTTP protegidas. |
+| `DATABASE_URL` | Conexión a PostgreSQL. |
+| `GEMINI_API_KEY` | Acceso a Gemini. |
+| `AEMET_API_KEY` | Acceso a AEMET. |
+| `CORS_ORIGINS` | Orígenes HTTP permitidos, separados por comas. |
+| `RATE_LIMIT_PER_MINUTE` | Peticiones por minuto admitidas; el valor predeterminado es 30. |
+| `ASK_TIMEOUT_SECONDS` | Tiempo máximo de una petición; el valor predeterminado es 60. |
+| `PORT` | Puerto HTTP proporcionado por Render. Si no está definido, el contenedor usa `8000`. |
+
+En Render, configura los valores reales en el panel de entorno. No copies claves ni cadenas de conexión a `Dockerfile`, al repositorio o al historial de Git.
+
 ## Cómo ejecutarlo
 Todos estos comandos gastan API de Gemini.
 
