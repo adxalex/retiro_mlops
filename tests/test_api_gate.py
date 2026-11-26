@@ -4,6 +4,13 @@ from fastapi.testclient import TestClient
 
 from security import RateLimiter, SecurityGateMiddleware
 
+import logging
+import pytest
+from fastapi.testclient import TestClient
+
+import config
+from api import create_app
+
 
 API_KEY_CORRECTA = "clave-de-prueba"
 
@@ -153,3 +160,132 @@ def test_peticion_422_con_clave_valida_consume_limite():
     assert first_response.status_code == 422
     assert second_response.status_code == 429
     assert API_KEY_CORRECTA in limiter.requests
+
+
+
+RUTAS_PROTEGIDAS_API = [
+    "/ask",
+    "/approve",
+    "/threads/hilo-prueba",
+]
+
+
+@pytest.mark.parametrize("ruta", RUTAS_PROTEGIDAS_API)
+def test_app_real_sin_api_key_configurada_devuelve_503(
+    ruta,
+    monkeypatch,
+    in_memory_repo,
+    fake_agent,
+):
+    monkeypatch.setattr(config, "API_KEY", " ")
+    app = create_app(repo=in_memory_repo, agent=fake_agent)
+
+    with TestClient(app) as client:
+        response = client.get(ruta, params={"api_key": "clave-prueba"})
+
+    assert response.status_code == 503
+
+
+@pytest.mark.parametrize("ruta", RUTAS_PROTEGIDAS_API)
+def test_app_real_sin_clave_devuelve_401(
+    ruta,
+    monkeypatch,
+    in_memory_repo,
+    fake_agent,
+):
+    monkeypatch.setattr(config, "API_KEY", "clave-prueba")
+    app = create_app(repo=in_memory_repo, agent=fake_agent)
+
+    with TestClient(app) as client:
+        response = client.get(ruta)
+
+    assert response.status_code == 401
+
+
+@pytest.mark.parametrize("ruta", RUTAS_PROTEGIDAS_API)
+def test_app_real_superar_limite_devuelve_429(
+    ruta,
+    monkeypatch,
+    in_memory_repo,
+    fake_agent,
+):
+    monkeypatch.setattr(config, "API_KEY", "clave-prueba")
+    monkeypatch.setattr(config, "RATE_LIMIT_PER_MINUTE", 1)
+
+    app = create_app(repo=in_memory_repo, agent=fake_agent)
+
+    with TestClient(app) as client:
+        primera = client.get(
+            ruta,
+            params={"api_key": "clave-prueba"},
+        )
+        segunda = client.get(
+            ruta,
+            params={"api_key": "clave-prueba"},
+        )
+
+    assert primera.status_code != 429
+    assert segunda.status_code == 429
+
+
+def test_cors_solo_origenes_listados(
+    monkeypatch,
+    in_memory_repo,
+    fake_agent,
+):
+    origen_permitido = "https://frontend-prueba.com"
+    origen_no_permitido = "https://otro-origen.com"
+    api_key = "clave-prueba-cors"
+
+    monkeypatch.setattr(config, "API_KEY", api_key)
+    monkeypatch.setattr(config, "RATE_LIMIT_PER_MINUTE", 1)
+    monkeypatch.setattr(
+        config,
+        "CORS_ORIGINS",
+        [origen_permitido],
+    )
+
+    app = create_app(repo=in_memory_repo, agent=fake_agent)
+
+    with TestClient(app) as client:
+        # 1. El origen permitido recibe autorización CORS.
+        response_permitida = client.get(
+            "/health",
+            headers={"Origin": origen_permitido},
+        )
+
+        assert (
+            response_permitida.headers.get("access-control-allow-origin")
+            == origen_permitido
+        )
+
+        # 2. El origen no incluido no recibe autorización CORS.
+        response_no_permitida = client.get(
+            "/health",
+            headers={"Origin": origen_no_permitido},
+        )
+
+        assert (
+            "access-control-allow-origin"
+            not in response_no_permitida.headers
+        )
+
+        # 3. OPTIONS no necesita API key y no consume el límite.
+        preflight = client.options(
+            "/ask",
+            headers={
+                "Origin": origen_permitido,
+                "Access-Control-Request-Method": "POST",
+            },
+        )
+
+        assert preflight.status_code != 401
+
+        # Con límite 1, esta petición debe poder llegar a la ruta.
+        # Devolverá 404 porque el endpoint se implementará en M9.
+        response_protegida = client.get(
+            "/threads/hilo-prueba",
+            params={"api_key": api_key},
+        )
+
+        assert response_protegida.status_code != 429
