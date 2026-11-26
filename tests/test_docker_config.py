@@ -26,7 +26,8 @@ def test_instala_requirements():
 def test_uvicorn_inicia_api_app():
     dockerfile = leer_archivo("Dockerfile")
     assert "uvicorn" in dockerfile
-    assert "api:app" in dockerfile
+    assert "api:create_app" in dockerfile
+    assert "--factory" in dockerfile
 
 
 def test_host_es_todos_los_interfaces():
