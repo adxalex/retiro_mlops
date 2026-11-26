@@ -36,12 +36,12 @@
       Si se crea `render.yaml`, debe configurar Docker y variables, pero no fijar manualmente `PORT` ni declarar réplicas múltiples.
       Hecho cuando: la documentación incluye los comandos exactos de build/run, explica el fallback de puerto y el escalado horizontal deshabilitado; `render.yaml`, si existe, no contiene una asignación manual de `PORT`.
 
-- [ ] T7. Verificar la imagen manualmente sin dependencias externas. (RF-1 a RF-10)
+- [x] T7. Verificar la imagen manualmente sin dependencias externas. (RF-1 a RF-10)
       Depende de: T2, T3, T4, T6.
       Ejecutar build, arranque local y inspección de contexto. Las pruebas de API real se posponen hasta que M5 integre `api.py`; no se deben usar claves reales ni llamar a LLM, AEMET o PostgreSQL.
       Hecho cuando:
       - `docker build -t retiro-api .` termina con las dependencias instaladas.
-      - `docker run --rm -p 8080:8080 -e PORT=8080 retiro-api` muestra a Uvicorn escuchando en `0.0.0.0:8080`, o queda documentado como bloqueado hasta M5 si `api.py` no existe.
+      - `docker run --rm -p 8080:8080 -e PORT=8080 --env-file .env retiro-api` muestra a Uvicorn escuchando en `0.0.0.0:8080`, o queda documentado como bloqueado hasta M5 si `api.py` no existe.
       - Ejecutar sin `PORT` muestra el puerto documentado `8000`.
       - Inspeccionar el contexto y las capas confirma que no contienen `.env`, claves ni la cadena de conexión.
 
