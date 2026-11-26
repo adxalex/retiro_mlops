@@ -45,8 +45,8 @@ def create_app(repo=None, agent=None):
         redoc_url=None,
     )
     
-    # Hilos que tienen un plan pendiente de aprobación.
-    app.state.pending_threads = set()
+    # Hilos con planes pendientes y datos del turno original.
+    app.state.pending_threads = {}
 
     # Hilos que tienen una petición en ejecución.
     app.state.in_flight_threads = set()
@@ -215,6 +215,7 @@ def create_app(repo=None, agent=None):
             resultado.get("pendiente_aprobacion", False)
         )
 
+
         # Si existe un plan pendiente, comprobamos si debe autoaprobarse.
         if pendiente_aprobacion:
 
@@ -250,8 +251,12 @@ def create_app(repo=None, agent=None):
                     "error": None,
                 }
 
-            # Si no se autoaprueba, dejamos el plan pendiente.
-            app.state.pending_threads.add(thread_id)
+            # Si no se autoaprueba, conservamos los datos del turno pendiente.
+            app.state.pending_threads[thread_id] = {
+                "question": request.pregunta,
+                "answer": respuesta,
+                "plan": plan,
+            }
 
             return {
                 "respuesta": respuesta,
@@ -279,5 +284,5 @@ def create_app(repo=None, agent=None):
             "pendiente_hitl": False,
             "error": None,
         }
-
+    
     return app
