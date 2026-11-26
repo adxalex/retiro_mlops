@@ -3,7 +3,7 @@
 > Una tarea cada vez: `/sdd-implementar Tn`. Tests primero (en rojo y luego en verde). Marca `[x]` al terminar.
 > Esta spec prepara el contenedor sin modificar el negocio de la API. El arranque con `api:app` se verifica manualmente cuando M5 haya integrado `api.py`.
 
-- [ ] T1. Crear el test estático de Docker. (RF-1 a RF-10)
+- [x] T1. Crear el test estático de Docker. (RF-1 a RF-10)
       Tests primero: crear `tests/test_docker_config.py` con lecturas de `Dockerfile`, `.dockerignore` y documentación. Los casos iniciales cubren base Python, instalación de requisitos, Uvicorn, host, puerto, worker, access log, exclusiones y variables de entorno. Mientras no existan los archivos, deben fallar.
       Hecho cuando: `pytest tests/test_docker_config.py -q` falla por implementación ausente y queda listo para pasar en las tareas siguientes.
 
