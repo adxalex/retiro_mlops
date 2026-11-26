@@ -14,12 +14,16 @@ def build_tables() -> None:
 
 def turn_upload(*,thread_id: str, pregunta: str, respuesta: str,decision:str|None,comentario:str|None) -> None:
     with Session(engine) as session:
-        if session.get(Conversation, thread_id) is None:
-            session.add(Conversation(id=thread_id))
+        try:
+            if session.get(Conversation, thread_id) is None:
+                session.add(Conversation(id=thread_id))
+                session.commit()
+            session.add(Message(thread_id=thread_id, role="user", content=pregunta))
+            session.add(Message(thread_id=thread_id, role="assistant", content=respuesta,decision=decision,comment=comentario))
             session.commit()
-        session.add(Message(thread_id=thread_id, role="user", content=pregunta))
-        session.add(Message(thread_id=thread_id, role="assistant", content=respuesta,decision=decision,comment=comentario))
-        session.commit()
+        except Exception:
+            session.rollback()
+            raise
 
 
 def messages_thread(thread_id: str) -> list[dict[str, Any]]:
@@ -28,7 +32,13 @@ def messages_thread(thread_id: str) -> list[dict[str, Any]]:
     return [{
             "role": m.role,
             "content": m.content,
-            "decision": m.decision,
-            "comment":m.comment,
+            **(
+                {
+                    "decision": m.decision if m.decision else None,
+                    "comentario": m.comment if m.comment else None,
+                }
+                if m.role == "assistant"
+                else {}
+            ),
             "created_at": m.created_at.isoformat() if m.created_at else None,
         } for m in mgs]
