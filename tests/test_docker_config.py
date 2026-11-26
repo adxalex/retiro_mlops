@@ -74,3 +74,13 @@ def test_documenta_variables_de_entorno():
     ):
         assert variable in readme
     assert "8000" in readme
+
+
+def test_documenta_construccion_ejecucion_y_render():
+    readme = leer_archivo("README.md")
+    assert "docker build -t retiro-api ." in readme
+    assert "docker run" in readme
+    assert "PORT=8080" in readme
+    assert "8000" in readme
+    assert "Render" in readme
+    assert "una sola réplica" in readme

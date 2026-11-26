@@ -30,7 +30,7 @@
       Implementar solo documentación/configuración declarativa; no añadir secretos ni leer `.env` dentro de la imagen.
       Hecho cuando: `pytest tests/test_docker_config.py::test_documenta_variables_de_entorno -q` pasa y la documentación muestra cómo pasar variables al contenedor.
 
-- [ ] T6. Preparar la documentación de construcción, ejecución y Render. (RF-5, RF-10)
+- [x] T6. Preparar la documentación de construcción, ejecución y Render. (RF-5, RF-10)
       Depende de: T5.
       Actualizar `README.md` con build Docker, ejecución local con `PORT=8080`, puerto predeterminado `8000`, variables Render y la restricción de una sola réplica mientras exista estado en memoria.
       Si se crea `render.yaml`, debe configurar Docker y variables, pero no fijar manualmente `PORT` ni declarar réplicas múltiples.

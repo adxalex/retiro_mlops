@@ -80,6 +80,31 @@ La API Docker recibe su configuración mediante variables de entorno; no las inc
 
 En Render, configura los valores reales en el panel de entorno. No copies claves ni cadenas de conexión a `Dockerfile`, al repositorio o al historial de Git.
 
+### Docker y despliegue
+
+Construye la imagen desde la raíz del repositorio:
+
+```bash
+docker build -t retiro-api .
+```
+
+Ejecuta el contenedor localmente con un puerto distinto del predeterminado:
+
+```bash
+docker run --rm -p 8080:8080 -e PORT=8080 retiro-api
+```
+
+Uvicorn escucha en `0.0.0.0`, usa un único worker y desactiva su access log. Si `PORT` no está definido, el contenedor utiliza el puerto `8000`. Render proporciona `PORT` automáticamente; no lo declares manualmente en una configuración de despliegue.
+
+En Render:
+
+1. Configura el servicio como despliegue Docker con esta raíz de repositorio.
+2. Añade las variables de entorno del apartado anterior en el panel de Render.
+3. Mantén una sola réplica mientras el checkpoint del grafo y los planes pendientes permanezcan en memoria.
+4. Antes del despliegue completo, verifica que `api.py` esté integrado y que el índice Chroma necesario tenga una estrategia de distribución definida.
+
+No copies `.env` ni `chroma/` a la imagen. El contexto Docker excluye los archivos locales, temporales y secretos mediante `.dockerignore`.
+
 ## Cómo ejecutarlo
 Todos estos comandos gastan API de Gemini.
 
