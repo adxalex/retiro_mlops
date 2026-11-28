@@ -130,6 +130,25 @@ def create_app(repo=None, agent=None):
     app.state.repo = repo
     app.state.agent = agent
 
+    def comprobar_repositorio():
+        """Comprueba que el repositorio está disponible."""
+
+        from fastapi import HTTPException
+
+        try:
+            if not repo.ping():
+                raise HTTPException(
+                    status_code=503,
+                    detail="Repositorio no disponible",
+                )
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(
+                status_code=503,
+                detail="Repositorio no disponible",
+            )
+
     @app.get("/health")
     def health():
         """Comprueba el estado de la API y del repositorio."""
@@ -145,32 +164,67 @@ def create_app(repo=None, agent=None):
             "db": db_status,
         }
 
-    @app.post("/ask", response_model=AskResponse)
+    @app.post(
+        "/ask",
+        response_model=AskResponse,
+        openapi_extra={
+            "parameters": [
+                {
+                    "name": "api_key",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": "string"},
+                }
+            ]
+        },
+    )
+
     async def ask(request: AskRequest):
         """Procesa una pregunta con timeout y reserva por hilo."""
+
+        comprobar_repositorio()
 
         thread_id = request.thread_id or uuid.uuid4().hex
 
         from fastapi import HTTPException
 
-        # Comprobamos si el hilo tiene un plan pendiente de aprobación.
         if thread_id in app.state.pending_threads:
             raise HTTPException(
                 status_code=409,
                 detail="El hilo tiene un plan pendiente de aprobación",
             )
 
-        # Comprobamos si ya hay otra petición ejecutándose en este hilo.
         if thread_id in app.state.in_flight_threads:
             raise HTTPException(
                 status_code=409,
                 detail="Ya hay una petición en ejecución para este hilo",
             )
 
-        # Reservamos el hilo antes de iniciar el agente.
         app.state.in_flight_threads.add(thread_id)
 
-        # Ejecutamos el agente en un hilo independiente.
+        reserva_diferida = False
+
+        def liberar_reserva(tarea):
+            app.state.in_flight_threads.discard(thread_id)
+
+            if not tarea.cancelled():
+                tarea.exception()
+
+        async def ejecutar_en_hilo(funcion, **kwargs):
+            nonlocal reserva_diferida
+
+            tarea = asyncio.create_task(
+                asyncio.to_thread(funcion, **kwargs)
+            )
+
+            try:
+                return await asyncio.shield(tarea)
+
+            except asyncio.CancelledError:
+                reserva_diferida = True
+                tarea.add_done_callback(liberar_reserva)
+                raise
+
         tarea_agente = asyncio.create_task(
             asyncio.to_thread(
                 agent.procesar_turno,
@@ -180,120 +234,128 @@ def create_app(repo=None, agent=None):
         )
 
         try:
-            resultado = await asyncio.wait_for(
-                asyncio.shield(tarea_agente),
-                timeout=config.ASK_TIMEOUT_SECONDS,
+            # El timeout se aplica únicamente a la ejecución del agente.
+            try:
+                resultado = await asyncio.wait_for(
+                    asyncio.shield(tarea_agente),
+                    timeout=config.ASK_TIMEOUT_SECONDS,
+                )
+
+            except asyncio.TimeoutError:
+                # El agente sigue trabajando. No guardamos su resultado.
+                reserva_diferida = True
+                tarea_agente.add_done_callback(liberar_reserva)
+
+                raise HTTPException(
+                    status_code=504,
+                    detail="Tiempo de espera agotado al procesar la consulta",
+                )
+
+            except asyncio.CancelledError:
+                # Si el cliente se desconecta, el agente puede seguir trabajando.
+                reserva_diferida = True
+                tarea_agente.add_done_callback(liberar_reserva)
+                raise
+
+            if resultado.get("error"):
+                raise RuntimeError("Error al procesar la consulta")
+
+            respuesta = resultado.get("respuesta", "") or ""
+            plan = resultado.get("plan", []) or []
+            pendiente_aprobacion = bool(
+                resultado.get("pendiente_aprobacion", False)
             )
 
-        except asyncio.TimeoutError:
-            # El agente continúa ejecutándose después del timeout.
-            # Liberamos la reserva únicamente cuando termine realmente.
-            def liberar_reserva(tarea):
-                app.state.in_flight_threads.discard(thread_id)
+            if pendiente_aprobacion:
+                if request.auto_aprobar:
+                    resultado_aprobacion = await ejecutar_en_hilo(
+                        agent.aprobar_plan,
+                        thread_id=thread_id,
+                        aprobado=True,
+                        comentario="",
+                    )
 
-                # Recuperamos posibles excepciones de la tarea.
-                if not tarea.cancelled():
-                    tarea.exception()
+                    if resultado_aprobacion.get("error"):
+                        raise RuntimeError("Error al aprobar el plan")
 
-            tarea_agente.add_done_callback(liberar_reserva)
+                    respuesta = (
+                        resultado_aprobacion.get("respuesta", "") or ""
+                    )
+                    plan = resultado_aprobacion.get("plan", []) or []
 
-            raise HTTPException(
-                status_code=504,
-                detail="Tiempo de espera agotado al procesar la consulta",
-            )
+                    await ejecutar_en_hilo(
+                        repo.save,
+                        thread_id=thread_id,
+                        question=request.pregunta,
+                        answer=respuesta,
+                        decision="aprobado",
+                        comment="",
+                    )
 
-        except Exception:
-            # Si el agente falla, liberamos inmediatamente la reserva.
-            app.state.in_flight_threads.discard(thread_id)
-            raise
+                    return {
+                        "respuesta": respuesta,
+                        "plan": plan,
+                        "thread_id": thread_id,
+                        "done": bool(
+                            resultado_aprobacion.get("done", False)
+                        ),
+                        "pendiente_hitl": False,
+                        "error": None,
+                    }
 
-        # El agente ha terminado correctamente.
-        app.state.in_flight_threads.discard(thread_id)
-
-        # Si el agente devuelve un error, no guardamos el turno.
-        if resultado.get("error"):
-            raise RuntimeError("Error al procesar la consulta")
-
-        respuesta = resultado.get("respuesta", "") or ""
-        plan = resultado.get("plan", []) or []
-        pendiente_aprobacion = bool(
-            resultado.get("pendiente_aprobacion", False)
-        )
-
-
-        # Si existe un plan pendiente, comprobamos si debe autoaprobarse.
-        if pendiente_aprobacion:
-
-            if request.auto_aprobar:
-                resultado_aprobacion = agent.aprobar_plan(
-                    thread_id=thread_id,
-                    aprobado=True,
-                    comentario="",
-                )
-
-                if resultado_aprobacion.get("error"):
-                    raise RuntimeError("Error al aprobar el plan")
-
-                respuesta = (
-                    resultado_aprobacion.get("respuesta", "") or ""
-                )
-                plan = resultado_aprobacion.get("plan", []) or []
-
-                repo.save(
-                    thread_id=thread_id,
-                    question=request.pregunta,
-                    answer=respuesta,
-                    decision="aprobado",
-                    comment="",
-                )
+                app.state.pending_threads[thread_id] = {
+                    "question": request.pregunta,
+                    "answer": respuesta,
+                    "plan": plan,
+                }
 
                 return {
                     "respuesta": respuesta,
                     "plan": plan,
                     "thread_id": thread_id,
-                    "done": bool(resultado_aprobacion.get("done", False)),
-                    "pendiente_hitl": False,
+                    "done": False,
+                    "pendiente_hitl": True,
                     "error": None,
                 }
 
-            # Si no se autoaprueba, conservamos los datos del turno pendiente.
-            app.state.pending_threads[thread_id] = {
-                "question": request.pregunta,
-                "answer": respuesta,
-                "plan": plan,
-            }
+            await ejecutar_en_hilo(
+                repo.save,
+                thread_id=thread_id,
+                question=request.pregunta,
+                answer=respuesta,
+                decision=None,
+                comment=None,
+            )
 
             return {
                 "respuesta": respuesta,
                 "plan": plan,
                 "thread_id": thread_id,
-                "done": False,
-                "pendiente_hitl": True,
+                "done": bool(resultado.get("done", False)),
+                "pendiente_hitl": False,
                 "error": None,
             }
 
-        # Si no hay aprobación pendiente, guardamos el turno.
-        repo.save(
-            thread_id=thread_id,
-            question=request.pregunta,
-            answer=respuesta,
-            decision=None,
-            comment=None,
-        )
+        finally:
+            if not reserva_diferida:
+                app.state.in_flight_threads.discard(thread_id)
 
-        return {
-            "respuesta": respuesta,
-            "plan": plan,
-            "thread_id": thread_id,
-            "done": bool(resultado.get("done", False)),
-            "pendiente_hitl": False,
-            "error": None,
-        }
-
-    
-    @app.post("/approve", response_model=AskResponse)
+    @app.post(
+        "/approve",
+        openapi_extra={
+            "parameters": [
+                {
+                    "name": "api_key",
+                    "in": "query",
+                    "required": True,
+                    "schema": {"type": "string"},
+                }
+            ]
+        },
+    )
     def approve(request: ApproveRequest):
         """Aprueba o rechaza un plan pendiente."""
+        comprobar_repositorio()
 
         from fastapi import HTTPException
 
@@ -363,9 +425,19 @@ def create_app(repo=None, agent=None):
 
 
     @app.get(
-        "/threads/{thread_id}/messages",
-        response_model=list[MessageResponse],
-    )
+    "/threads/{thread_id}/messages",
+    response_model=list[MessageResponse],
+    openapi_extra={
+        "parameters": [
+            {
+                "name": "api_key",
+                "in": "query",
+                "required": True,
+                "schema": {"type": "string"},
+            }
+        ]
+    },
+)
     def get_thread_messages(
         thread_id: str = Path(
             min_length=1,
@@ -374,6 +446,8 @@ def create_app(repo=None, agent=None):
         ),
     ):
         """Devuelve el historial de mensajes de un hilo."""
+
+        comprobar_repositorio()
 
         from fastapi import HTTPException
 
@@ -413,5 +487,4 @@ def create_app(repo=None, agent=None):
 
         return mensajes
 
-    
     return app
