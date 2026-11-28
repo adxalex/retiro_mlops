@@ -477,3 +477,74 @@ def test_ask_reserva_se_libera_cuando_agente_termina(
 
     finally:
         liberar_agente.set()
+
+
+def test_ask_segunda_peticion_mientras_guarda_devuelve_409(
+    api_client,
+    in_memory_repo,
+    monkeypatch,
+):
+    import config
+
+    monkeypatch.setattr(config, "ASK_TIMEOUT_SECONDS", 3)
+
+    guardado_iniciado = Event()
+    liberar_guardado = Event()
+
+    # Conservamos el método save original del repositorio.
+    guardar_original = in_memory_repo.save
+
+    def save_bloqueado(thread_id, question, answer, decision, comment):
+        guardado_iniciado.set()
+
+        # Mantenemos bloqueado el guardado hasta que llegue la segunda petición.
+        liberar_guardado.wait(timeout=3)
+
+        return guardar_original(
+            thread_id=thread_id,
+            question=question,
+            answer=answer,
+            decision=decision,
+            comment=comment,
+        )
+
+    # Sustituimos save temporalmente por nuestra versión controlada.
+    in_memory_repo.save = save_bloqueado
+
+    try:
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            primera_peticion = executor.submit(
+                api_client.post,
+                "/ask?api_key=test-key",
+                json={
+                    "pregunta": "Organiza una visita",
+                    "thread_id": "hilo-guardado-123",
+                },
+            )
+
+            # Esperamos a que la primera petición llegue al guardado.
+            assert guardado_iniciado.wait(timeout=2)
+
+            # Mientras sigue guardando, intentamos entrar en el mismo hilo.
+            segunda_peticion = api_client.post(
+                "/ask?api_key=test-key",
+                json={
+                    "pregunta": "Añade otro lugar",
+                    "thread_id": "hilo-guardado-123",
+                },
+            )
+
+            # La segunda petición debe ser rechazada.
+            assert segunda_peticion.status_code == 409
+
+            # Permitimos que termine el guardado.
+            liberar_guardado.set()
+
+            primera_respuesta = primera_peticion.result(timeout=3)
+
+            assert primera_respuesta.status_code == 200
+            assert len(in_memory_repo.turnos) == 1
+
+    finally:
+        # Evitamos dejar el hilo bloqueado si falla alguna aserción.
+        liberar_guardado.set()
